@@ -19,24 +19,6 @@ MAIN_MENU = [
     ["\ud83d\udcf2 \u041c\u044b \u0432 Telegram", "\ud83d\udcf8 \u041d\u0430\u0448 Instagram"]
 ]
 
-# Подкатегории
-IPHONE_CATEGORIES = [
-    ["iPhone 11"],
-    ["iPhone 12"],
-    ["iPhone 13"],
-    ["iPhone 14"],
-    ["iPhone 15"],
-    ["iPhone 16"],
-    ["\ud83d\udd19 \u041d\u0430\u0437\u0430\u0434"]
-]
-
-SAMSUNG_CATEGORIES = [
-    ["Samsung S23"],
-    ["Samsung S24"],
-    ["Samsung S25"],
-    ["\ud83d\udd19 \u041d\u0430\u0437\u0430\u0434"]
-]
-
 DYSON_CATEGORIES = [
     ["\u0421\u0442\u0430\u0439\u043b\u0435\u0440\u044b"],
     ["\u0424\u0435\u043d\u044b"],
@@ -74,11 +56,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prices = load_prices()
 
     if text == "\ud83d\udcf1 iPhone":
-        keyboard = ReplyKeyboardMarkup(IPHONE_CATEGORIES, resize_keyboard=True)
+        iphone_models = [model for model in prices.keys() if model.startswith("iPhone")]
+        keyboard = ReplyKeyboardMarkup([[m] for m in iphone_models] + [["\ud83d\udd19 \u041d\u0430\u0437\u0430\u0434"]], resize_keyboard=True)
         await update.message.reply_text("\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043c\u043e\u0434\u0435\u043b\u044c iPhone:", reply_markup=keyboard)
 
     elif text == "\ud83d\udcf1 Samsung":
-        keyboard = ReplyKeyboardMarkup(SAMSUNG_CATEGORIES, resize_keyboard=True)
+        samsung_models = [model for model in prices.keys() if model.startswith("Samsung")]
+        keyboard = ReplyKeyboardMarkup([[m] for m in samsung_models] + [["\ud83d\udd19 \u041d\u0430\u0437\u0430\u0434"]], resize_keyboard=True)
         await update.message.reply_text("\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u043c\u043e\u0434\u0435\u043b\u044c Samsung:", reply_markup=keyboard)
 
     elif text == "\ud83d\udca8 Dyson":
@@ -93,7 +77,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 response += f"- {config}: {price}\n"
             await update.message.reply_text(response)
         else:
-            await update.message.reply_text("\u041d\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445 \u0434\u043b\u044f \u044d\u0442\u043e\u0439 \u043c\u043e\u0434\u0435\u043b\u0438.")
+            await update.message.reply_text("\u041f\u0440\u0430\u0439\u0441 \u043f\u0443\u0441\u0442.")
 
     elif text == "\ud83d\udd19 \u041d\u0430\u0437\u0430\u0434":
         keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)

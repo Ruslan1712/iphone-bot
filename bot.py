@@ -8,6 +8,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 # ========== Настройки ==========
 TOKEN = os.getenv("TOKEN")
 CHANNEL_ID = "@apple_street_41"
+MANAGER_CHAT_ID = 658248330  # ID Стеллы
 
 if not TOKEN:
     raise ValueError("❌ Ошибка: переменная окружения TOKEN не установлена.")
@@ -84,6 +85,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # Проверяем ожидает ли пользователь ввода заказа
     if user_id in AWAITING_ORDER and AWAITING_ORDER[user_id]:
         await process_order(update, context)
         return
@@ -156,7 +158,7 @@ async def confirm_subscription(update, context):
         keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
         await update.message.reply_text("Спасибо за подписку! Добро пожаловать:", reply_markup=keyboard)
     else:
-        await update.message.reply_text("Вы еще не подписались на канал!")
+        await update.message.reply_text("Вы ещё не подписались на канал!")
 
 async def send_model_prices(update, context, model_name):
     prices = load_prices()
@@ -176,25 +178,24 @@ async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
     order_text = (
-        "📦 *Новая заявка*\n"
+        "📦 *Новая заявка!*\n\n"
         f"👤 *Клиент:* @{client_username}\n"
-        f"🌐 *ID:* {user_id}\n"
-        f"⏰ *Время:* {now}\n"
+        f"🌐 *ID клиента:* `{user_id}`\n"
+        f"⏰ *Время заявки:* {now}\n"
         f"📝 *Заказ:* {text}"
     )
 
-    manager_username = "Stella_markova"
-
     try:
         await context.bot.send_message(
-            chat_id=f"@{manager_username}",
+            chat_id=MANAGER_CHAT_ID,
             text=order_text,
             parse_mode="Markdown"
         )
+        await update.message.reply_text("✅ Ваша заявка принята! Менеджер скоро свяжется с вами.")
     except Exception as e:
-        logging.error(f"Ошибка при отправке заявки менеджеру: {e}")
+        logging.error(f"Ошибка отправки заявки менеджеру: {e}")
+        await update.message.reply_text("❌ Ошибка при отправке заявки. Попробуйте позже.")
 
-    await update.message.reply_text("✅ Заявка принята! Менеджер скоро с вами свяжется.")
     AWAITING_ORDER.pop(user_id, None)
 
 async def reviews_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

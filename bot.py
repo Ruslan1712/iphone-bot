@@ -1,6 +1,7 @@
 import logging
 import os
 import json
+from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
@@ -17,6 +18,7 @@ logging.basicConfig(
 MAIN_MENU = [
     ["iPhone", "Samsung"],
     ["Dyson", "Отзывы"],
+    ["\ud83d\udce6 Сделать заказ"],
     ["Мы в Telegram", "Наш Instagram"]
 ]
 
@@ -24,8 +26,11 @@ DYSON_CATEGORIES = [
     ["Стайлеры"],
     ["Фены"],
     ["Выпрямители"],
-    ["🔙 Назад"]
+    ["\ud83d\udd19 Назад"]
 ]
+
+# Состояние ожидания заказа
+AWAITING_ORDER = {}
 
 # Загрузка прайсов из JSON
 
@@ -49,26 +54,25 @@ async def is_subscribed(user_id, context):
         return False
 
 # Обработчик отзывов
-
 async def reviews_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     review_dir = "reviews"
-    files = sorted([f for f in os.listdir(review_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
+    files = sorted([f for f in os.listdir(review_dir) if f.lower().endswith((".jpg", ".jpeg", ".png"))])
     media = []
     for i, filename in enumerate(files):
         path = os.path.join(review_dir, filename)
-        caption = "💬 Отзыв клиента" if i == 0 else None
-        media.append(InputMediaPhoto(open(path, "rb"), caption=caption))
+        with open(path, "rb") as f:
+            caption = "\ud83d\udcac Отзыв клиента" if i == 0 else None
+            media.append(InputMediaPhoto(f.read(), caption=caption))
     if media:
         await update.message.reply_media_group(media)
     else:
         await update.message.reply_text("Пока нет отзывов.")
 
 # Стартовое меню
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not await is_subscribed(user_id, context):
-        keyboard = ReplyKeyboardMarkup([[KeyboardButton("✅ Я подписался")]], resize_keyboard=True)
+        keyboard = ReplyKeyboardMarkup([[KeyboardButton("\u2705 Я подписался")]], resize_keyboard=True)
         await update.message.reply_text(f"Для использования бота подпишитесь на наш канал: https://t.me/apple_street_41", reply_markup=keyboard)
         return
 
@@ -76,12 +80,41 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Добро пожаловать! Выберите категорию:", reply_markup=keyboard)
 
 # Обработчик сообщений
-
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    if text == "✅ Я подписался":
+    # Проверка, если пользователь пишет ответ на заказ
+    if AWAITING_ORDER.get(user_id):
+        manager_username = "Stella_markova"  # Без @
+        client_username = update.effective_user.username or "без username"
+        now = datetime.now().strftime("%d.%m.%Y %H:%M")
+        order_text = (
+            "\ud83d\udce6 *Новая заявка*\n"
+            f"\ud83d\udc64 *Клиент:* @{client_username}\n"
+            f"\ud83c\udf10 *ID:* {user_id}\n"
+            f"\u23f0 *Время:* {now}\n"
+            f"\ud83d\udcdd *Заказ:* {text}"
+        )
+
+        # Отправляем менеджеру
+        try:
+            await context.bot.send_message(
+                chat_id=f"@{manager_username}",
+                text=order_text,
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logging.error(f"Не удалось отправить заказ менеджеру: {e}")
+
+        # Отправляем клиенту подтверждение
+        await update.message.reply_text("\u2705 Заявка принята! Менеджер скоро с вами свяжется для уточнения подробностей.")
+
+        # Убираем пользователя из ожидания заявки
+        AWAITING_ORDER.pop(user_id, None)
+        return
+
+    if text == "\u2705 Я подписался":
         if await is_subscribed(user_id, context):
             keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
             await update.message.reply_text("Спасибо за подписку! Добро пожаловать:", reply_markup=keyboard)
@@ -90,7 +123,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not await is_subscribed(user_id, context):
-        keyboard = ReplyKeyboardMarkup([[KeyboardButton("✅ Я подписался")]], resize_keyboard=True)
+        keyboard = ReplyKeyboardMarkup([[KeyboardButton("\u2705 Я подписался")]], resize_keyboard=True)
         await update.message.reply_text(f"Для использования бота подпишитесь на наш канал: https://t.me/apple_street_41", reply_markup=keyboard)
         return
 
@@ -98,12 +131,12 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "iPhone":
         iphone_models = [model for model in prices.keys() if model.startswith("iPhone")]
-        keyboard = ReplyKeyboardMarkup([[m] for m in iphone_models] + [["🔙 Назад"]], resize_keyboard=True)
+        keyboard = ReplyKeyboardMarkup([[m] for m in iphone_models] + [["\ud83d\udd19 Назад"]], resize_keyboard=True)
         await update.message.reply_text("Выберите модель iPhone:", reply_markup=keyboard)
 
     elif text == "Samsung":
         samsung_models = [model for model in prices.keys() if model.startswith("Samsung")]
-        keyboard = ReplyKeyboardMarkup([[m] for m in samsung_models] + [["🔙 Назад"]], resize_keyboard=True)
+        keyboard = ReplyKeyboardMarkup([[m] for m in samsung_models] + [["\ud83d\udd19 Назад"]], resize_keyboard=True)
         await update.message.reply_text("Выберите модель Samsung:", reply_markup=keyboard)
 
     elif text == "Dyson":
@@ -127,7 +160,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("Прайс пуст.")
 
-    elif text == "🔙 Назад":
+    elif text == "\ud83d\udd19 Назад":
         keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
         await update.message.reply_text("Главное меню:", reply_markup=keyboard)
 
@@ -140,11 +173,14 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "Отзывы":
         await reviews_handler(update, context)
 
+    elif text == "\ud83d\udce6 Сделать заказ":
+        AWAITING_ORDER[user_id] = True
+        await update.message.reply_text("✏️ Пожалуйста, напишите, что вы хотите заказать:")
+
     else:
         await update.message.reply_text("Пожалуйста, выберите пункт из меню.")
 
 # Запуск бота
-
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))

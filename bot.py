@@ -53,6 +53,37 @@ async def is_subscribed(user_id, context):
         logging.error(f"Ошибка проверки подписки: {e}")
         return False
 
+# Обработчик оформления заказа
+async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    client_username = update.effective_user.username or "без username"
+    now = datetime.now().strftime("%d.%m.%Y %H:%M")
+    text = update.message.text.strip()
+
+    order_text = (
+        "\ud83d\udce6 *Новая заявка*\n"
+        f"\ud83d\udc64 *Клиент:* @{client_username}\n"
+        f"\ud83c\udf10 *ID:* {user_id}\n"
+        f"\u23f0 *Время:* {now}\n"
+        f"\ud83d\udcdd *Заказ:* {text}"
+    )
+
+    manager_username = "Stella_markova"
+
+    try:
+        await context.bot.send_message(
+            chat_id=f"@{manager_username}",
+            text=order_text,
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logging.error(f"Ошибка при отправке заявки менеджеру: {e}")
+
+    await update.message.reply_text("✅ Заявка принята! Менеджер скоро с вами свяжется для уточнения подробностей.")
+
+    # Убираем из списка ожидания
+    AWAITING_ORDER.pop(user_id, None)
+
 # Обработчик отзывов
 async def reviews_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     review_dir = "reviews"
@@ -84,34 +115,14 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    # Проверка, если пользователь пишет ответ на заказ
-    if AWAITING_ORDER.get(user_id):
-        manager_username = "Stella_markova"  # Без @
-        client_username = update.effective_user.username or "без username"
-        now = datetime.now().strftime("%d.%m.%Y %H:%M")
-        order_text = (
-            "\ud83d\udce6 *Новая заявка*\n"
-            f"\ud83d\udc64 *Клиент:* @{client_username}\n"
-            f"\ud83c\udf10 *ID:* {user_id}\n"
-            f"\u23f0 *Время:* {now}\n"
-            f"\ud83d\udcdd *Заказ:* {text}"
-        )
+    # Если пользователь в процессе оформления заказа
+    if user_id in AWAITING_ORDER and AWAITING_ORDER[user_id]:
+        await process_order(update, context)
+        return
 
-        # Отправляем менеджеру
-        try:
-            await context.bot.send_message(
-                chat_id=f"@{manager_username}",
-                text=order_text,
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            logging.error(f"Не удалось отправить заказ менеджеру: {e}")
-
-        # Отправляем клиенту подтверждение
-        await update.message.reply_text("\u2705 Заявка принята! Менеджер скоро с вами свяжется для уточнения подробностей.")
-
-        # Убираем пользователя из ожидания заявки
-        AWAITING_ORDER.pop(user_id, None)
+    if text == "\ud83d\udce6 Сделать заказ":
+        AWAITING_ORDER[user_id] = True
+        await update.message.reply_text("✏️ Пожалуйста, напишите, что вы хотите заказать:")
         return
 
     if text == "\u2705 Я подписался":
@@ -172,10 +183,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif text == "Отзывы":
         await reviews_handler(update, context)
-
-    elif text == "\ud83d\udce6 Сделать заказ":
-        AWAITING_ORDER[user_id] = True
-        await update.message.reply_text("✏️ Пожалуйста, напишите, что вы хотите заказать:")
 
     else:
         await update.message.reply_text("Пожалуйста, выберите пункт из меню.")

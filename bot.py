@@ -5,20 +5,18 @@ from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
-# Токен через переменные окружения
+# ========== Настройки ==========
 TOKEN = os.getenv("TOKEN")
 CHANNEL_ID = "@apple_street_41"
 
-# Логирование
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
-)
+if not TOKEN:
+    raise ValueError("❌ Ошибка: переменная окружения TOKEN не установлена.")
 
 # Главное меню
 MAIN_MENU = [
     ["iPhone", "Samsung"],
     ["Dyson", "Отзывы"],
-    ["\ud83d\udce6 Сделать заказ"],
+    ["📦 Сделать заказ"],
     ["Мы в Telegram", "Наш Instagram"]
 ]
 
@@ -26,25 +24,33 @@ DYSON_CATEGORIES = [
     ["Стайлеры"],
     ["Фены"],
     ["Выпрямители"],
-    ["\ud83d\udd19 Назад"]
+    ["🔙 Назад"]
 ]
 
-# Состояние ожидания заказа
+# Состояние заказов
 AWAITING_ORDER = {}
 
-# Загрузка прайсов из JSON
+# Настройка логов
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+# ========== Загрузчики данных ==========
 def load_prices():
-    with open("prices.json", "r", encoding="utf-8") as f:
-        return json.load(f)
-
-# Загрузка прайса стайлеров из отдельного файла
+    try:
+        with open("prices.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logging.error("❌ Файл prices.json не найден.")
+        return {}
 
 def load_dyson_stylers():
-    with open("dyson_stylers.json", "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open("dyson_stylers.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logging.error("❌ Файл dyson_stylers.json не найден.")
+        return {}
 
-# Проверка подписки на канал
+# ========== Вспомогательные функции ==========
 async def is_subscribed(user_id, context):
     try:
         member = await context.bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
@@ -53,7 +59,116 @@ async def is_subscribed(user_id, context):
         logging.error(f"Ошибка проверки подписки: {e}")
         return False
 
-# Обработчик оформления заказа
+# ========== Основные обработчики ==========
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not await is_subscribed(user_id, context):
+        keyboard = ReplyKeyboardMarkup([[KeyboardButton("✅ Я подписался")]], resize_keyboard=True)
+        await update.message.reply_text(
+            f"Для использования бота подпишитесь на наш канал: https://t.me/apple_street_41",
+            reply_markup=keyboard
+        )
+        return
+    keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
+    await update.message.reply_text("Добро пожаловать! Выберите категорию:", reply_markup=keyboard)
+
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    text = update.message.text.strip()
+
+    if not await is_subscribed(user_id, context):
+        keyboard = ReplyKeyboardMarkup([[KeyboardButton("✅ Я подписался")]], resize_keyboard=True)
+        await update.message.reply_text(
+            f"Для использования бота подпишитесь на наш канал: https://t.me/apple_street_41",
+            reply_markup=keyboard
+        )
+        return
+
+    if user_id in AWAITING_ORDER and AWAITING_ORDER[user_id]:
+        await process_order(update, context)
+        return
+
+    COMMANDS = {
+        "iPhone": handle_iphone,
+        "Samsung": handle_samsung,
+        "Dyson": handle_dyson,
+        "Отзывы": reviews_handler,
+        "📦 Сделать заказ": start_order,
+        "🔙 Назад": go_back_to_menu,
+        "Мы в Telegram": send_telegram_link,
+        "Наш Instagram": send_instagram_link,
+        "✅ Я подписался": confirm_subscription,
+        "Стайлеры": handle_stylers,
+    }
+
+    if text in COMMANDS:
+        await COMMANDS[text](update, context)
+        return
+
+    prices = load_prices()
+    if text in prices:
+        await send_model_prices(update, context, text)
+    else:
+        await update.message.reply_text("Пожалуйста, выберите пункт из меню.")
+
+# ========== Отдельные функции действий ==========
+async def handle_iphone(update, context):
+    prices = load_prices()
+    iphone_models = [model for model in prices.keys() if model.startswith("iPhone")]
+    keyboard = ReplyKeyboardMarkup([[m] for m in iphone_models] + [["🔙 Назад"]], resize_keyboard=True)
+    await update.message.reply_text("Выберите модель iPhone:", reply_markup=keyboard)
+
+async def handle_samsung(update, context):
+    prices = load_prices()
+    samsung_models = [model for model in prices.keys() if model.startswith("Samsung")]
+    keyboard = ReplyKeyboardMarkup([[m] for m in samsung_models] + [["🔙 Назад"]], resize_keyboard=True)
+    await update.message.reply_text("Выберите модель Samsung:", reply_markup=keyboard)
+
+async def handle_dyson(update, context):
+    keyboard = ReplyKeyboardMarkup(DYSON_CATEGORIES, resize_keyboard=True)
+    await update.message.reply_text("Выберите категорию Dyson:", reply_markup=keyboard)
+
+async def handle_stylers(update, context):
+    dyson_stylers = load_dyson_stylers()
+    response = "Прайс на стайлеры Dyson:\n"
+    for name, price in dyson_stylers.items():
+        response += f"- {name}: {price}\n"
+    await update.message.reply_text(response)
+
+async def start_order(update, context):
+    user_id = update.effective_user.id
+    AWAITING_ORDER[user_id] = True
+    await update.message.reply_text("✏️ Пожалуйста, напишите, что вы хотите заказать:")
+
+async def go_back_to_menu(update, context):
+    keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
+    await update.message.reply_text("Главное меню:", reply_markup=keyboard)
+
+async def send_telegram_link(update, context):
+    await update.message.reply_text("Наш Telegram канал: https://t.me/ваш_канал")
+
+async def send_instagram_link(update, context):
+    await update.message.reply_text("Наш Instagram: https://instagram.com/ваш_инстаграм")
+
+async def confirm_subscription(update, context):
+    user_id = update.effective_user.id
+    if await is_subscribed(user_id, context):
+        keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
+        await update.message.reply_text("Спасибо за подписку! Добро пожаловать:", reply_markup=keyboard)
+    else:
+        await update.message.reply_text("Вы еще не подписались на канал!")
+
+async def send_model_prices(update, context, model_name):
+    prices = load_prices()
+    model_info = prices.get(model_name)
+    if isinstance(model_info, dict):
+        response = f"{model_name}:\n"
+        for config, price in model_info.items():
+            response += f"- {config}: {price}\n"
+        await update.message.reply_text(response)
+    else:
+        await update.message.reply_text("Прайс пуст.")
+
 async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     client_username = update.effective_user.username or "без username"
@@ -61,11 +176,11 @@ async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
     order_text = (
-        "\ud83d\udce6 *Новая заявка*\n"
-        f"\ud83d\udc64 *Клиент:* @{client_username}\n"
-        f"\ud83c\udf10 *ID:* {user_id}\n"
-        f"\u23f0 *Время:* {now}\n"
-        f"\ud83d\udcdd *Заказ:* {text}"
+        "📦 *Новая заявка*\n"
+        f"👤 *Клиент:* @{client_username}\n"
+        f"🌐 *ID:* {user_id}\n"
+        f"⏰ *Время:* {now}\n"
+        f"📝 *Заказ:* {text}"
     )
 
     manager_username = "Stella_markova"
@@ -79,116 +194,29 @@ async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logging.error(f"Ошибка при отправке заявки менеджеру: {e}")
 
-    await update.message.reply_text("✅ Заявка принята! Менеджер скоро с вами свяжется для уточнения подробностей.")
-
-    # Убираем из списка ожидания
+    await update.message.reply_text("✅ Заявка принята! Менеджер скоро с вами свяжется.")
     AWAITING_ORDER.pop(user_id, None)
 
-# Обработчик отзывов
 async def reviews_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     review_dir = "reviews"
+    if not os.path.exists(review_dir):
+        await update.message.reply_text("Папка с отзывами не найдена.")
+        return
+
     files = sorted([f for f in os.listdir(review_dir) if f.lower().endswith((".jpg", ".jpeg", ".png"))])
     media = []
     for i, filename in enumerate(files):
         path = os.path.join(review_dir, filename)
         with open(path, "rb") as f:
-            caption = "\ud83d\udcac Отзыв клиента" if i == 0 else None
+            caption = "💬 Отзыв клиента" if i == 0 else None
             media.append(InputMediaPhoto(f.read(), caption=caption))
     if media:
         await update.message.reply_media_group(media)
     else:
         await update.message.reply_text("Пока нет отзывов.")
 
-# Стартовое меню
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not await is_subscribed(user_id, context):
-        keyboard = ReplyKeyboardMarkup([[KeyboardButton("\u2705 Я подписался")]], resize_keyboard=True)
-        await update.message.reply_text(f"Для использования бота подпишитесь на наш канал: https://t.me/apple_street_41", reply_markup=keyboard)
-        return
-
-    keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
-    await update.message.reply_text("Добро пожаловать! Выберите категорию:", reply_markup=keyboard)
-
-# Обработчик сообщений
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    text = update.message.text.strip()
-
-    # Если пользователь в процессе оформления заказа
-    if user_id in AWAITING_ORDER and AWAITING_ORDER[user_id]:
-        await process_order(update, context)
-        return
-
-    if text == "\ud83d\udce6 Сделать заказ":
-        AWAITING_ORDER[user_id] = True
-        await update.message.reply_text("✏️ Пожалуйста, напишите, что вы хотите заказать:")
-        return
-
-    if text == "\u2705 Я подписался":
-        if await is_subscribed(user_id, context):
-            keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
-            await update.message.reply_text("Спасибо за подписку! Добро пожаловать:", reply_markup=keyboard)
-        else:
-            await update.message.reply_text("Вы ещё не подписались на канал! Подпишитесь: https://t.me/apple_street_41")
-        return
-
-    if not await is_subscribed(user_id, context):
-        keyboard = ReplyKeyboardMarkup([[KeyboardButton("\u2705 Я подписался")]], resize_keyboard=True)
-        await update.message.reply_text(f"Для использования бота подпишитесь на наш канал: https://t.me/apple_street_41", reply_markup=keyboard)
-        return
-
-    prices = load_prices()
-
-    if text == "iPhone":
-        iphone_models = [model for model in prices.keys() if model.startswith("iPhone")]
-        keyboard = ReplyKeyboardMarkup([[m] for m in iphone_models] + [["\ud83d\udd19 Назад"]], resize_keyboard=True)
-        await update.message.reply_text("Выберите модель iPhone:", reply_markup=keyboard)
-
-    elif text == "Samsung":
-        samsung_models = [model for model in prices.keys() if model.startswith("Samsung")]
-        keyboard = ReplyKeyboardMarkup([[m] for m in samsung_models] + [["\ud83d\udd19 Назад"]], resize_keyboard=True)
-        await update.message.reply_text("Выберите модель Samsung:", reply_markup=keyboard)
-
-    elif text == "Dyson":
-        keyboard = ReplyKeyboardMarkup(DYSON_CATEGORIES, resize_keyboard=True)
-        await update.message.reply_text("Выберите категорию Dyson:", reply_markup=keyboard)
-
-    elif text == "Стайлеры":
-        dyson_stylers = load_dyson_stylers()
-        response = "Прайс на стайлеры Dyson:\n"
-        for name, price in dyson_stylers.items():
-            response += f"- {name}: {price}\n"
-        await update.message.reply_text(response)
-
-    elif text in prices:
-        model_info = prices.get(text)
-        if isinstance(model_info, dict):
-            response = f"{text}:\n"
-            for config, price in model_info.items():
-                response += f"- {config}: {price}\n"
-            await update.message.reply_text(response)
-        else:
-            await update.message.reply_text("Прайс пуст.")
-
-    elif text == "\ud83d\udd19 Назад":
-        keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
-        await update.message.reply_text("Главное меню:", reply_markup=keyboard)
-
-    elif text == "Мы в Telegram":
-        await update.message.reply_text("https://t.me/ваш_канал")
-
-    elif text == "Наш Instagram":
-        await update.message.reply_text("https://instagram.com/ваш_инстаграм")
-
-    elif text == "Отзывы":
-        await reviews_handler(update, context)
-
-    else:
-        await update.message.reply_text("Пожалуйста, выберите пункт из меню.")
-
-# Запуск бота
-if __name__ == '__main__':
+# ========== Запуск приложения ==========
+if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))

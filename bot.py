@@ -32,6 +32,12 @@ def load_prices():
     with open("prices.json", "r", encoding="utf-8") as f:
         return json.load(f)
 
+# Загрузка прайса стайлеров из отдельного файла
+
+def load_dyson_stylers():
+    with open("dyson_stylers.json", "r", encoding="utf-8") as f:
+        return json.load(f)
+
 # Обработчик отзывов
 
 async def reviews_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -72,6 +78,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "Dyson":
         keyboard = ReplyKeyboardMarkup(DYSON_CATEGORIES, resize_keyboard=True)
         await update.message.reply_text("Выберите категорию Dyson:", reply_markup=keyboard)
+
+    elif text == "Стайлеры":
+        dyson_stylers = load_dyson_stylers()
+        response = "Прайс на стайлеры Dyson:\n"
+        for name, price in dyson_stylers.items():
+            response += f"- {name}: {price}\n"
+        await update.message.reply_text(response)
 
     elif text in prices:
         model_info = prices.get(text)

@@ -166,7 +166,11 @@ async def send_telegram_link(update, context):
     await update.message.reply_text("Наш Telegram канал: https://t.me/ваш_канал")
 
 async def send_instagram_link(update, context):
-    await update.message.reply_text("Наш Instagram: https://instagram.com/ваш_инстаграм")
+    instagram_url = "https://www.instagram.com/apple_street_41?igsh=MXFrYm9rNHFlYzM3Ng=="
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📷 Перейти в Instagram", url=instagram_url)]
+    ])
+    await update.message.reply_text("📷 Нажмите на кнопку ниже, чтобы перейти в наш Instagram!", reply_markup=keyboard)
 
 async def confirm_subscription(update, context):
     user_id = update.effective_user.id

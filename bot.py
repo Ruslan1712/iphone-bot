@@ -59,25 +59,24 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     prices = load_prices()
 
-    if "iPhone" in text:
+    if text == "iPhone":
         iphone_models = [model for model in prices.keys() if model.startswith("iPhone")]
         keyboard = ReplyKeyboardMarkup([[m] for m in iphone_models] + [["🔙 Назад"]], resize_keyboard=True)
         await update.message.reply_text("Выберите модель iPhone:", reply_markup=keyboard)
 
-    elif "Samsung" in text:
+    elif text == "Samsung":
         samsung_models = [model for model in prices.keys() if model.startswith("Samsung")]
         keyboard = ReplyKeyboardMarkup([[m] for m in samsung_models] + [["🔙 Назад"]], resize_keyboard=True)
         await update.message.reply_text("Выберите модель Samsung:", reply_markup=keyboard)
 
-    elif "Dyson" in text:
+    elif text == "Dyson":
         keyboard = ReplyKeyboardMarkup(DYSON_CATEGORIES, resize_keyboard=True)
         await update.message.reply_text("Выберите категорию Dyson:", reply_markup=keyboard)
 
     elif text in prices:
         model_info = prices.get(text)
         if isinstance(model_info, dict):
-            response = f"{text}:
-"
+            response = f"{text}:\n"
             for config, price in model_info.items():
                 response += f"- {config}: {price}\n"
             await update.message.reply_text(response)
@@ -88,13 +87,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
         await update.message.reply_text("Главное меню:", reply_markup=keyboard)
 
-    elif "Telegram" in text:
+    elif text == "Мы в Telegram":
         await update.message.reply_text("https://t.me/ваш_канал")
 
-    elif "Instagram" in text:
+    elif text == "Наш Instagram":
         await update.message.reply_text("https://instagram.com/ваш_инстаграм")
 
-    elif "Отзывы" in text:
+    elif text == "Отзывы":
         await reviews_handler(update, context)
 
     else:

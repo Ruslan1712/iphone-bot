@@ -1,11 +1,12 @@
 import logging
 import os
 import json
-from telegram import Update, ReplyKeyboardMarkup, InputMediaPhoto
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 # Токен через переменные окружения
 TOKEN = os.getenv("TOKEN")
+CHANNEL_ID = "@apple_street_41"
 
 # Логирование
 logging.basicConfig(
@@ -38,6 +39,15 @@ def load_dyson_stylers():
     with open("dyson_stylers.json", "r", encoding="utf-8") as f:
         return json.load(f)
 
+# Проверка подписки на канал
+async def is_subscribed(user_id, context):
+    try:
+        member = await context.bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
+        return member.status in ["member", "administrator", "creator"]
+    except Exception as e:
+        logging.error(f"Ошибка проверки подписки: {e}")
+        return False
+
 # Обработчик отзывов
 
 async def reviews_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -56,13 +66,34 @@ async def reviews_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Стартовое меню
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not await is_subscribed(user_id, context):
+        keyboard = ReplyKeyboardMarkup([[KeyboardButton("✅ Я подписался")]], resize_keyboard=True)
+        await update.message.reply_text(f"Для использования бота подпишитесь на наш канал: https://t.me/apple_street_41", reply_markup=keyboard)
+        return
+
     keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
     await update.message.reply_text("Добро пожаловать! Выберите категорию:", reply_markup=keyboard)
 
 # Обработчик сообщений
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     text = update.message.text.strip()
+
+    if text == "✅ Я подписался":
+        if await is_subscribed(user_id, context):
+            keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
+            await update.message.reply_text("Спасибо за подписку! Добро пожаловать:", reply_markup=keyboard)
+        else:
+            await update.message.reply_text("Вы ещё не подписались на канал! Подпишитесь: https://t.me/apple_street_41")
+        return
+
+    if not await is_subscribed(user_id, context):
+        keyboard = ReplyKeyboardMarkup([[KeyboardButton("✅ Я подписался")]], resize_keyboard=True)
+        await update.message.reply_text(f"Для использования бота подпишитесь на наш канал: https://t.me/apple_street_41", reply_markup=keyboard)
+        return
+
     prices = load_prices()
 
     if text == "iPhone":

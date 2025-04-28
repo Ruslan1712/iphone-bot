@@ -2,13 +2,14 @@ import logging
 import os
 import json
 from datetime import datetime
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 # ========== Настройки ==========
 TOKEN = os.getenv("TOKEN")
 CHANNEL_ID = "@apple_street_41"
 MANAGER_CHAT_ID = 658248330  # ID Стеллы
+BOT_USERNAME = "Applestreet_41_bot"  # username твоего бота без @
 
 if not TOKEN:
     raise ValueError("❌ Ошибка: переменная окружения TOKEN не установлена.")
@@ -21,18 +22,15 @@ MAIN_MENU = [
     ["Мы в Telegram", "Наш Instagram"]
 ]
 
-DYSON_CATEGORIES = [
-    ["Стайлеры"],
-    ["Фены"],
-    ["Выпрямители"],
-    ["🔙 Назад"]
-]
-
-# Состояние заказов
+DYSON_CATEGORIES = [["Стайлеры"], ["Фены"], ["Выпрямители"], ["🔙 Назад"]]
 AWAITING_ORDER = {}
 
 # Настройка логов
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+
+# Ключевые слова для автоответчика
+PRICE_KEYWORDS = ["цена", "стоимость", "узнать", "сколько стоит", "почем"]
+PRODUCT_KEYWORDS = ["iphone", "samsung", "dyson", "айфон", "самсунг", "дайсон", "iphone 15", "iphone 15 pro", "iphone 14", "s24", "s23", "airwrap", "supersonic"]
 
 # ========== Загрузчики данных ==========
 def load_prices():
@@ -65,10 +63,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not await is_subscribed(user_id, context):
         keyboard = ReplyKeyboardMarkup([[KeyboardButton("✅ Я подписался")]], resize_keyboard=True)
-        await update.message.reply_text(
-            f"Для использования бота подпишитесь на наш канал: https://t.me/apple_street_41",
-            reply_markup=keyboard
-        )
+        await update.message.reply_text("Для использования бота подпишитесь на наш канал: https://t.me/apple_street_41", reply_markup=keyboard)
         return
     keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
     await update.message.reply_text("Добро пожаловать! Выберите категорию:", reply_markup=keyboard)
@@ -79,13 +74,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not await is_subscribed(user_id, context):
         keyboard = ReplyKeyboardMarkup([[KeyboardButton("✅ Я подписался")]], resize_keyboard=True)
-        await update.message.reply_text(
-            f"Для использования бота подпишитесь на наш канал: https://t.me/apple_street_41",
-            reply_markup=keyboard
-        )
+        await update.message.reply_text("Для использования бота подпишитесь на наш канал: https://t.me/apple_street_41", reply_markup=keyboard)
         return
 
-    # Проверяем ожидает ли пользователь ввода заказа
     if user_id in AWAITING_ORDER and AWAITING_ORDER[user_id]:
         await process_order(update, context)
         return
@@ -113,7 +104,32 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Пожалуйста, выберите пункт из меню.")
 
-# ========== Отдельные функции действий ==========
+async def group_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message is None or update.message.text is None:
+        return
+
+    text = update.message.text.lower()
+
+    if any(keyword in text for keyword in PRICE_KEYWORDS):
+        found_products = [product for product in PRODUCT_KEYWORDS if product in text]
+
+        if found_products:
+            product_list = ", ".join(found_products)
+            reply_text = f"👋 Хотите узнать цену на *{product_list.title()}*?\nНажмите кнопку ниже 👇"
+        else:
+            reply_text = "👋 Добрый день! Если хотите узнать стоимость товара, нажмите кнопку ниже 👇"
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔥 Узнать цену", url=f"https://t.me/{BOT_USERNAME}?start=price_inquiry")],
+            [InlineKeyboardButton("📦 Сделать заказ", url=f"https://t.me/{BOT_USERNAME}?start=order")]
+        ])
+
+        try:
+            await update.message.reply_text(reply_text, parse_mode="Markdown", reply_markup=keyboard)
+        except Exception as e:
+            logging.error(f"Ошибка отправки автоответа с кнопками: {e}")
+
+# ========== Функции действий ==========
 async def handle_iphone(update, context):
     prices = load_prices()
     iphone_models = [model for model in prices.keys() if model.startswith("iPhone")]
@@ -220,5 +236,6 @@ async def reviews_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, message_handler))
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_message_handler))
     app.run_polling()

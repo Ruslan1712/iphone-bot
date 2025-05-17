@@ -2,7 +2,7 @@ import logging
 import os
 import json
 from datetime import datetime
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 # ========== Настройки ==========
@@ -18,7 +18,7 @@ if not TOKEN:
 MAIN_MENU = [
     ["iPhone", "Samsung"],
     ["Dyson", "Отзывы"],
-    ["📦 Сделать заказ"],
+    [KeyboardButton(text="📦 Сделать заказ", web_app=WebAppInfo(url="https://telegram-miniapp-store.onrender.com"))],
     ["Мы в Telegram", "Наш Instagram"]
 ]
 
@@ -86,12 +86,11 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Samsung": handle_samsung,
         "Dyson": handle_dyson,
         "Отзывы": reviews_handler,
-        "📦 Сделать заказ": start_order,
+        "✅ Я подписался": confirm_subscription,
+        "Стайлеры": handle_stylers,
         "🔙 Назад": go_back_to_menu,
         "Мы в Telegram": send_telegram_link,
         "Наш Instagram": send_instagram_link,
-        "✅ Я подписался": confirm_subscription,
-        "Стайлеры": handle_stylers,
     }
 
     if text in COMMANDS:
@@ -129,7 +128,7 @@ async def group_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
         except Exception as e:
             logging.error(f"Ошибка отправки автоответа с кнопками: {e}")
 
-# ========== Функции действий ==========
+# ========== Действия ==========
 async def handle_iphone(update, context):
     prices = load_prices()
     iphone_models = [model for model in prices.keys() if model.startswith("iPhone")]
@@ -153,17 +152,12 @@ async def handle_stylers(update, context):
         response += f"- {name}: {price}\n"
     await update.message.reply_text(response)
 
-async def start_order(update, context):
-    user_id = update.effective_user.id
-    AWAITING_ORDER[user_id] = True
-    await update.message.reply_text("✏️ Пожалуйста, напишите, что вы хотите заказать:")
-
 async def go_back_to_menu(update, context):
     keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
     await update.message.reply_text("Главное меню:", reply_markup=keyboard)
 
 async def send_telegram_link(update, context):
-    await update.message.reply_text("Наш Telegram канал: https://t.me/ваш_канал")
+    await update.message.reply_text("Наш Telegram канал: https://t.me/apple_street_41")
 
 async def send_instagram_link(update, context):
     instagram_url = "https://www.instagram.com/apple_street_41?igsh=MXFrYm9rNHFlYzM3Ng=="
@@ -236,7 +230,7 @@ async def reviews_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Пока нет отзывов.")
 
-# ========== Запуск приложения ==========
+# ========== Запуск ==========
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))

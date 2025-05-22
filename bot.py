@@ -41,7 +41,7 @@ async def extract_model_name(text):
 """
     try:
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",  # <-- НАДЁЖНАЯ МОДЕЛЬ
+            model="gpt-3.5-turbo",  # можно заменить на gpt-4, если есть доступ
             messages=[{"role": "user", "content": prompt}]
         )
         result = response.choices[0].message.content.strip()
@@ -49,7 +49,7 @@ async def extract_model_name(text):
         return result
     except OpenAIError as e:
         logging.error(f"[GPT ERROR]: {e}")
-        return "ошибка"
+        return f"[GPT ERROR]: {e}"  # ⚠️ Показываем ошибку прямо в Telegram
 
 # /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -66,7 +66,10 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"🤖 GPT распознал: {model_string}")
 
-    if model_string.lower() in ["ничего не найдено", "ошибка"]:
+    if "ошибка" in model_string.lower() or "error" in model_string.lower():
+        return  # Ошибка уже показана
+
+    if model_string.lower() in ["ничего не найдено", "непонятно", "не распознал"]:
         await update.message.reply_text("❌ Не удалось распознать товар.")
         return
 
@@ -85,7 +88,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("❌ Модель не найдена в прайсе.")
 
-# /test для отладки
+# /test команда
 async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("Пример: /test айфон 15 про 512")
@@ -94,10 +97,10 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     model = await extract_model_name(text)
     await update.message.reply_text(f"GPT понял: {model}")
 
-# запуск
+# Запуск
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("test", test_command))  # только латиница!
+    app.add_handler(CommandHandler("test", test_command))  # Тестовое сообщение
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.run_polling()

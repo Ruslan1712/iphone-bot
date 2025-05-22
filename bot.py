@@ -1,210 +1,92 @@
-import logging
 import os
 import json
+import logging
+from dotenv import load_dotenv
 from datetime import datetime
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+import openai
 
-# ========== Настройки ==========
+# Загрузка переменных из .env
+load_dotenv()
 TOKEN = os.getenv("TOKEN")
-MANAGER_CHAT_ID = 658248330  # ID Стеллы
-BOT_USERNAME = "Applestreet_41_bot"  # username твоего бота без @
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-if not TOKEN:
-    raise ValueError("❌ Ошибка: переменная окружения TOKEN не установлена.")
+if not TOKEN or not OPENAI_API_KEY:
+    raise ValueError("❌ Отсутствуют переменные TOKEN или OPENAI_API_KEY")
+
+openai.api_key = OPENAI_API_KEY
+
+# Логирование
+logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 # Главное меню
-MAIN_MENU = [
-    ["iPhone", "Samsung"],
-    ["Dyson", "Отзывы"],
-    [KeyboardButton(text="📦 Сделать заказ", web_app=WebAppInfo(url="https://telegram-miniapp-store.onrender.com"))],
-    ["Мы в Telegram", "Наш Instagram"]
-]
+MAIN_MENU = [["📦 Сделать заказ"], ["Отзывы", "Контакты"]]
 
-DYSON_CATEGORIES = [["Стайлеры"], ["Фены"], ["Выпрямители"], ["🔙 Назад"]]
-AWAITING_ORDER = {}
-
-# Настройка логов
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-
-# Ключевые слова для автоответчика
-PRICE_KEYWORDS = ["цена", "стоимость", "узнать", "сколько стоит", "почем"]
-PRODUCT_KEYWORDS = ["iphone", "samsung", "dyson", "айфон", "самсунг", "дайсон", "iphone 15", "iphone 15 pro", "iphone 14", "s24", "s23", "airwrap", "supersonic"]
-
-# ========== Загрузчики данных ==========
+# === Загрузка прайсов ===
 def load_prices():
     try:
         with open("prices.json", "r", encoding="utf-8") as f:
             return json.load(f)
-    except FileNotFoundError:
-        logging.error("❌ Файл prices.json не найден.")
+    except Exception as e:
+        logging.error(f"❌ Ошибка загрузки прайса: {e}")
         return {}
 
-def load_dyson_stylers():
+# === GPT распознавание товара ===
+async def extract_model_name(user_text):
+    prompt = f"""
+Ты — помощник магазина техники. Клиент написал: "{user_text}"
+Извлеки название товара и конфигурацию. Ответь только названием (например: iPhone 15 Pro 256GB).
+Если ничего не найдено — напиши: ничего не найдено.
+"""
     try:
-        with open("dyson_stylers.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        logging.error("❌ Файл dyson_stylers.json не найден.")
-        return {}
+        response = openai.ChatCompletion.create(
+            model="gpt-4",  # или gpt-3.5-turbo
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        logging.error(f"GPT ошибка: {e}")
+        return "ошибка"
 
-# ========== Основные обработчики ==========
+# === Обработка сообщений ===
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    prices = load_prices()
+
+    # GPT пытается распознать товар
+    model_string = await extract_model_name(text)
+    logging.info(f"Распознано GPT: {model_string}")
+
+    if model_string.lower() in ["ничего не найдено", "ошибка"]:
+        await update.message.reply_text("❌ Не удалось распознать товар. Попробуйте написать точнее.")
+        return
+
+    # Поиск товара в прайсе
+    for product, configs in prices.items():
+        if product.lower() in model_string.lower():
+            if isinstance(configs, dict):
+                for config_name, price in configs.items():
+                    if config_name.lower() in model_string.lower():
+                        await update.message.reply_text(f"{product} {config_name}: {price}")
+                        return
+                # Если конфигурация не указана
+                lines = [f"{k}: {v}" for k, v in configs.items()]
+                await update.message.reply_text(f"{product}:\n" + "\n".join(lines))
+            else:
+                await update.message.reply_text(f"{product}: {configs}")
+            return
+
+    await update.message.reply_text("❌ Модель не найдена в прайсе.")
+
+# === /start ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
-    await update.message.reply_text("Добро пожаловать! Выберите категорию:", reply_markup=keyboard)
+    await update.message.reply_text("Добро пожаловать! Напишите модель, чтобы узнать цену.", reply_markup=keyboard)
 
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    text = update.message.text.strip()
-
-    if user_id in AWAITING_ORDER and AWAITING_ORDER[user_id]:
-        await process_order(update, context)
-        return
-
-    COMMANDS = {
-        "iPhone": handle_iphone,
-        "Samsung": handle_samsung,
-        "Dyson": handle_dyson,
-        "Отзывы": reviews_handler,
-        "Стайлеры": handle_stylers,
-        "🔙 Назад": go_back_to_menu,
-        "Мы в Telegram": send_telegram_link,
-        "Наш Instagram": send_instagram_link,
-    }
-
-    if text in COMMANDS:
-        await COMMANDS[text](update, context)
-        return
-
-    prices = load_prices()
-    if text in prices:
-        await send_model_prices(update, context, text)
-    else:
-        await update.message.reply_text("Пожалуйста, выберите пункт из меню.")
-
-async def group_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message is None or update.message.text is None:
-        return
-
-    text = update.message.text.lower()
-
-    if any(keyword in text for keyword in PRICE_KEYWORDS):
-        found_products = [product for product in PRODUCT_KEYWORDS if product in text]
-
-        if found_products:
-            product_list = ", ".join(found_products)
-            reply_text = f"👋 Хотите узнать цену на *{product_list.title()}*?\nНажмите кнопку ниже 👇"
-        else:
-            reply_text = "👋 Добрый день! Если хотите узнать стоимость товара, нажмите кнопку ниже 👇"
-
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔥 Узнать цену", url=f"https://t.me/{BOT_USERNAME}?start=price_inquiry")],
-            [InlineKeyboardButton("📦 Сделать заказ", url=f"https://t.me/{BOT_USERNAME}?start=order")]
-        ])
-
-        try:
-            await update.message.reply_text(reply_text, parse_mode="Markdown", reply_markup=keyboard)
-        except Exception as e:
-            logging.error(f"Ошибка отправки автоответа с кнопками: {e}")
-
-# ========== Действия ==========
-async def handle_iphone(update, context):
-    prices = load_prices()
-    iphone_models = [model for model in prices.keys() if model.startswith("iPhone")]
-    keyboard = ReplyKeyboardMarkup([[m] for m in iphone_models] + [["🔙 Назад"]], resize_keyboard=True)
-    await update.message.reply_text("Выберите модель iPhone:", reply_markup=keyboard)
-
-async def handle_samsung(update, context):
-    prices = load_prices()
-    samsung_models = [model for model in prices.keys() if model.startswith("Samsung")]
-    keyboard = ReplyKeyboardMarkup([[m] for m in samsung_models] + [["🔙 Назад"]], resize_keyboard=True)
-    await update.message.reply_text("Выберите модель Samsung:", reply_markup=keyboard)
-
-async def handle_dyson(update, context):
-    keyboard = ReplyKeyboardMarkup(DYSON_CATEGORIES, resize_keyboard=True)
-    await update.message.reply_text("Выберите категорию Dyson:", reply_markup=keyboard)
-
-async def handle_stylers(update, context):
-    dyson_stylers = load_dyson_stylers()
-    response = "Прайс на стайлеры Dyson:\n"
-    for name, price in dyson_stylers.items():
-        response += f"- {name}: {price}\n"
-    await update.message.reply_text(response)
-
-async def go_back_to_menu(update, context):
-    keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
-    await update.message.reply_text("Главное меню:", reply_markup=keyboard)
-
-async def send_telegram_link(update, context):
-    await update.message.reply_text("Наш Telegram канал: https://t.me/apple_street_41")
-
-async def send_instagram_link(update, context):
-    instagram_url = "https://www.instagram.com/apple_street_41?igsh=MXFrYm9rNHFlYzM3Ng=="
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📷 Перейти в Instagram", url=instagram_url)]
-    ])
-    await update.message.reply_text("📷 Нажмите на кнопку ниже, чтобы перейти в наш Instagram!", reply_markup=keyboard)
-
-async def send_model_prices(update, context, model_name):
-    prices = load_prices()
-    model_info = prices.get(model_name)
-    if isinstance(model_info, dict):
-        response = f"{model_name}:\n"
-        for config, price in model_info.items():
-            response += f"- {config}: {price}\n"
-        await update.message.reply_text(response)
-    else:
-        await update.message.reply_text("Прайс пуст.")
-
-async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    client_username = update.effective_user.username or "без username"
-    now = datetime.now().strftime("%d.%m.%Y %H:%M")
-    text = update.message.text.strip()
-
-    order_text = (
-        "📦 *Новая заявка!*\n\n"
-        f"👤 *Клиент:* @{client_username}\n"
-        f"🌐 *ID клиента:* `{user_id}`\n"
-        f"⏰ *Время заявки:* {now}\n"
-        f"📝 *Заказ:* {text}"
-    )
-
-    try:
-        await context.bot.send_message(
-            chat_id=MANAGER_CHAT_ID,
-            text=order_text,
-            parse_mode="Markdown"
-        )
-        await update.message.reply_text("✅ Ваша заявка принята! Менеджер скоро свяжется с вами.")
-    except Exception as e:
-        logging.error(f"Ошибка отправки заявки менеджеру: {e}")
-        await update.message.reply_text("❌ Ошибка при отправке заявки. Попробуйте позже.")
-
-    AWAITING_ORDER.pop(user_id, None)
-
-async def reviews_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    review_dir = "reviews"
-    if not os.path.exists(review_dir):
-        await update.message.reply_text("Папка с отзывами не найдена.")
-        return
-
-    files = sorted([f for f in os.listdir(review_dir) if f.lower().endswith((".jpg", ".jpeg", ".png"))])
-    media = []
-    for i, filename in enumerate(files):
-        path = os.path.join(review_dir, filename)
-        with open(path, "rb") as f:
-            caption = "💬 Отзыв клиента" if i == 0 else None
-            media.append(InputMediaPhoto(f.read(), caption=caption))
-    if media:
-        await update.message.reply_media_group(media)
-    else:
-        await update.message.reply_text("Пока нет отзывов.")
-
-# ========== Запуск ==========
+# === Запуск бота ===
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, message_handler))
-    app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND, group_message_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.run_polling()

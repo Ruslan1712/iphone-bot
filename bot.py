@@ -4,7 +4,7 @@ import logging
 from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-import openai
+from openai import OpenAI, OpenAIError  # Новый импорт
 
 # === Загрузка переменных окружения ===
 load_dotenv()
@@ -12,9 +12,9 @@ TOKEN = os.getenv("TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 if not TOKEN or not OPENAI_API_KEY:
-    raise ValueError("❌ Переменные окружения TOKEN или OPENAI_API_KEY не найдены")
+    raise ValueError("❌ Отсутствует переменная окружения TOKEN или OPENAI_API_KEY")
 
-openai.api_key = OPENAI_API_KEY
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # === Логирование ===
 logging.basicConfig(level=logging.INFO)
@@ -28,10 +28,10 @@ def load_prices():
         with open("prices.json", "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
-        logging.error(f"[ERROR] Не удалось загрузить prices.json: {e}")
+        logging.error(f"[ОШИБКА] Не удалось загрузить prices.json: {e}")
         return {}
 
-# === GPT-распознавание текста пользователя ===
+# === GPT: извлечение модели и конфигурации ===
 async def extract_model_name(text):
     prompt = f"""
 Ты — помощник магазина техники. Клиент написал: "{text}"
@@ -39,14 +39,14 @@ async def extract_model_name(text):
 Если не можешь распознать — напиши: ничего не найдено.
 """
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}]
         )
         result = response.choices[0].message.content.strip()
         logging.info(f"[GPT]: {result}")
         return result
-    except Exception as e:
+    except OpenAIError as e:
         logging.error(f"[GPT ERROR]: {e}")
         return "ошибка"
 
@@ -58,7 +58,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # === Основной обработчик текста ===
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    logging.info(f"[USER]: {text}")
+    logging.info(f"[ПОЛЬЗОВАТЕЛЬ]: {text}")
 
     prices = load_prices()
     model_string = await extract_model_name(text)
@@ -84,19 +84,19 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("❌ Модель не найдена в прайсе.")
 
-# === Команда /test — отладка GPT ===
+# === /test команда для отладки GPT ===
 async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Пример: /test айфон 16 про 512")
+        await update.message.reply_text("Пример: /test айфон 16 про 256")
         return
     text = " ".join(context.args)
     model = await extract_model_name(text)
     await update.message.reply_text(f"GPT понял: {model}")
 
-# === Запуск приложения ===
+# === Запуск бота ===
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("test", test_command))  # ВАЖНО: только латиница
+    app.add_handler(CommandHandler("test", test_command))  # Только латиница!
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.run_polling()

@@ -7,7 +7,6 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Con
 
 # ========== Настройки ==========
 TOKEN = os.getenv("TOKEN")
-CHANNEL_ID = "@apple_street_41"
 MANAGER_CHAT_ID = 658248330  # ID Стеллы
 BOT_USERNAME = "Applestreet_41_bot"  # username твоего бота без @
 
@@ -49,33 +48,14 @@ def load_dyson_stylers():
         logging.error("❌ Файл dyson_stylers.json не найден.")
         return {}
 
-# ========== Вспомогательные функции ==========
-async def is_subscribed(user_id, context):
-    try:
-        member = await context.bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-        return member.status in ["member", "administrator", "creator"]
-    except Exception as e:
-        logging.error(f"Ошибка проверки подписки: {e}")
-        return False
-
 # ========== Основные обработчики ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if not await is_subscribed(user_id, context):
-        keyboard = ReplyKeyboardMarkup([[KeyboardButton("✅ Я подписался")]], resize_keyboard=True)
-        await update.message.reply_text("Для использования бота подпишитесь на наш канал: https://t.me/apple_street_41", reply_markup=keyboard)
-        return
     keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
     await update.message.reply_text("Добро пожаловать! Выберите категорию:", reply_markup=keyboard)
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text.strip()
-
-    if not await is_subscribed(user_id, context):
-        keyboard = ReplyKeyboardMarkup([[KeyboardButton("✅ Я подписался")]], resize_keyboard=True)
-        await update.message.reply_text("Для использования бота подпишитесь на наш канал: https://t.me/apple_street_41", reply_markup=keyboard)
-        return
 
     if user_id in AWAITING_ORDER and AWAITING_ORDER[user_id]:
         await process_order(update, context)
@@ -86,7 +66,6 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Samsung": handle_samsung,
         "Dyson": handle_dyson,
         "Отзывы": reviews_handler,
-        "✅ Я подписался": confirm_subscription,
         "Стайлеры": handle_stylers,
         "🔙 Назад": go_back_to_menu,
         "Мы в Telegram": send_telegram_link,
@@ -165,14 +144,6 @@ async def send_instagram_link(update, context):
         [InlineKeyboardButton("📷 Перейти в Instagram", url=instagram_url)]
     ])
     await update.message.reply_text("📷 Нажмите на кнопку ниже, чтобы перейти в наш Instagram!", reply_markup=keyboard)
-
-async def confirm_subscription(update, context):
-    user_id = update.effective_user.id
-    if await is_subscribed(user_id, context):
-        keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
-        await update.message.reply_text("Спасибо за подписку! Добро пожаловать:", reply_markup=keyboard)
-    else:
-        await update.message.reply_text("Вы ещё не подписались на канал!")
 
 async def send_model_prices(update, context, model_name):
     prices = load_prices()

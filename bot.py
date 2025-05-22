@@ -6,7 +6,7 @@ from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from openai import OpenAI, OpenAIError
 
-# === Загрузка .env ===
+# === Загрузка .env (в Railway переменные идут из окружения напрямую) ===
 load_dotenv()
 TOKEN = os.getenv("TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -36,12 +36,19 @@ def load_prices():
 async def extract_model_name(text):
     prompt = f"""
 Ты — помощник магазина техники. Клиент написал: "{text}"
-Ответь одной строкой — модель и конфигурация (например: iPhone 15 Pro 256GB).
-Если не можешь распознать — напиши: ничего не найдено.
+
+Твоя задача — попытаться определить и вернуть точное название модели и конфигурации товара из ассортимента магазина.
+
+В ответе просто напиши точное название модели и конфигурации одной строкой — без лишних слов. Пример:
+
+iPhone 16 Pro Max 512 White
+
+Если не удалось распознать — напиши: ничего не найдено.
 """
+
     try:
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",  # можно заменить на gpt-4, если есть доступ
+            model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}]
         )
         result = response.choices[0].message.content.strip()
@@ -49,14 +56,23 @@ async def extract_model_name(text):
         return result
     except OpenAIError as e:
         logging.error(f"[GPT ERROR]: {e}")
-        return f"[GPT ERROR]: {e}"  # ⚠️ Показываем ошибку прямо в Telegram
+        return f"[GPT ERROR]: {e}"
 
 # /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
     await update.message.reply_text("Привет! Напиши модель товара или выбери из меню:", reply_markup=keyboard)
 
-# обработка сообщений
+# /test
+async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Пример: /test айфон 16 про макс 512")
+        return
+    text = " ".join(context.args)
+    model = await extract_model_name(text)
+    await update.message.reply_text(f"GPT понял: {model}")
+
+# Обработка сообщений
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     logging.info(f"[ПОЛЬЗОВАТЕЛЬ]: {text}")
@@ -67,12 +83,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🤖 GPT распознал: {model_string}")
 
     if "ошибка" in model_string.lower() or "error" in model_string.lower():
-        return  # Ошибка уже показана
+        return
 
     if model_string.lower() in ["ничего не найдено", "непонятно", "не распознал"]:
         await update.message.reply_text("❌ Не удалось распознать товар.")
         return
 
+    # Поиск по прайсу
     for product, configs in prices.items():
         if product.lower() in model_string.lower():
             if isinstance(configs, dict):
@@ -88,19 +105,10 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("❌ Модель не найдена в прайсе.")
 
-# /test команда
-async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Пример: /test айфон 15 про 512")
-        return
-    text = " ".join(context.args)
-    model = await extract_model_name(text)
-    await update.message.reply_text(f"GPT понял: {model}")
-
 # Запуск
 if __name__ == "__main__":
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("test", test_command))  # Тестовое сообщение
+    app.add_handler(CommandHandler("test", test_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     app.run_polling()

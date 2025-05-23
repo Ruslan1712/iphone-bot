@@ -14,7 +14,6 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not TOKEN or not OPENAI_API_KEY:
     raise ValueError("❌ Нет переменных окружения")
 
-# GPT клиент
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Логи
@@ -22,24 +21,23 @@ logging.basicConfig(level=logging.INFO)
 
 # Главное меню
 MAIN_MENU = [["📦 Сделать заказ"], ["Отзывы", "Контакты"]]
+pending_colors = {}  # user_id: base_model
 
-# Временное хранилище для ожидания цвета
-pending_colors = {}
-
-# Загрузка прайса
 def load_prices():
     try:
-        with open("prices.json", "r", encoding="utf-8") as f:
+        with open("prices_full_ready.json", "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         logging.error(f"[ERROR] Не удалось загрузить prices.json: {e}")
         return {}
 
-# GPT: извлечение модели
+# GPT обработка
 async def extract_model_name(text):
     prompt = f"""
 Ты — помощник магазина техники. Клиент написал: "{text}"
-Ответь одной строкой — модель и конфигурация (например: iPhone 15 Pro 256GB).
+
+Извлеки модель телефона и объём памяти. Пример: "iPhone 16 Pro Max 256".
+Если цвет не указан — не придумывай.
 Если не можешь распознать — напиши: ничего не найдено.
 """
     try:
@@ -54,12 +52,11 @@ async def extract_model_name(text):
         logging.error(f"[GPT ERROR]: {e}")
         return f"[GPT ERROR]: {e}"
 
-# /start
+# Команды
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = ReplyKeyboardMarkup(MAIN_MENU, resize_keyboard=True)
-    await update.message.reply_text("Привет! Напиши модель товара или выбери из меню:", reply_markup=keyboard)
+    await update.message.reply_text("Привет! Напиши модель телефона (например: Айфон 15 Про Макс 256):", reply_markup=keyboard)
 
-# /test команда
 async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text("Пример: /test айфон 15 про 512")
@@ -68,52 +65,45 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     model = await extract_model_name(text)
     await update.message.reply_text(f"GPT понял: {model}")
 
-# обработка сообщений
+# Обработка сообщений
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     text = update.message.text.strip()
     logging.info(f"[ПОЛЬЗОВАТЕЛЬ]: {text}")
+
     prices = load_prices()
 
-    # Проверка: ожидается ли от пользователя уточнение цвета
+    # Уточнение цвета
     if user_id in pending_colors:
-        base_model = pending_colors[user_id]
-        del pending_colors[user_id]
-
+        base_model = pending_colors.pop(user_id)
         for product, configs in prices.items():
             if product.lower() in base_model.lower():
                 for config_name, price in configs.items():
                     if base_model.lower() in f"{product} {config_name}".lower() and text.lower() in config_name.lower():
                         await update.message.reply_text(f"✅ {product} {config_name}: {price}")
                         return
-        await update.message.reply_text("❌ Указанный цвет не найден для этой модели.")
+        await update.message.reply_text("❌ Указанный цвет не найден.")
         return
 
+    # Основная модель
     model_string = await extract_model_name(text)
     await update.message.reply_text(f"🤖 GPT распознал: {model_string}")
 
-    if "ошибка" in model_string.lower() or "error" in model_string.lower():
-        return
-
-    if model_string.lower() in ["ничего не найдено", "непонятно", "не распознал"]:
+    if "ничего не найдено" in model_string.lower():
         await update.message.reply_text("❌ Не удалось распознать товар.")
         return
 
+    # Поиск по JSON
     for product, configs in prices.items():
         if product.lower() in model_string.lower():
-            if isinstance(configs, dict):
-                for config_name, price in configs.items():
-                    if config_name.lower() in model_string.lower():
-                        await update.message.reply_text(f"✅ {product} {config_name}: {price}")
-                        return
-
-                # Цвет не указан — уточнить у пользователя
-                pending_colors[user_id] = model_string
-                await update.message.reply_text("Уточните, пожалуйста, какой цвет вас интересует?")
-                return
-            else:
-                await update.message.reply_text(f"{product}: {configs}")
-                return
+            for config_name, price in configs.items():
+                if config_name.lower() in model_string.lower():
+                    await update.message.reply_text(f"✅ {product} {config_name}: {price}")
+                    return
+            # Уточнение цвета
+            pending_colors[user_id] = model_string
+            await update.message.reply_text("Уточните, пожалуйста, какой цвет вас интересует?")
+            return
 
     await update.message.reply_text("❌ Модель не найдена в прайсе.")
 
